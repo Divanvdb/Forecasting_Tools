@@ -4,3 +4,5 @@ data/*
 models_2/*
 models_OM/*
 models_FCST/*
+deep_models/*
+lightning_logs/*

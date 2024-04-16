@@ -24,9 +24,11 @@ import xgboost as xgb
 
 import joblib
 
+target_col = 0
+
 class WeatherDataModule(L.LightningDataModule):
     def __init__(self, data_dir="data\current_weather_data.csv", index_='timestamp', 
-                 column=2, batch_size=64, window_size=5, normalize_=False,
+                 column=0, batch_size=64, window_size=5, normalize_=False,
                  date_range = None, step_ = 24):
         super().__init__()
         self.data_dir = data_dir
@@ -87,20 +89,20 @@ class WeatherDataModule(L.LightningDataModule):
         else:
             return pd.DataFrame(self.scaler.inverse_transform(series.values.reshape(-1, 1)), index=series.index)
     
-    def inverse_single_column(self, series, column = 2):
+    def inverse_single_column(self, series):
         if self.column == None:
             zeros_ = pd.DataFrame(np.zeros((series.shape[0], self.df.shape[1])))
-            zeros_[column] = series 
-            return pd.DataFrame(self.scaler.inverse_transform(zeros_))[column]
+            zeros_[target_col] = series 
+            return pd.DataFrame(self.scaler.inverse_transform(zeros_))[target_col]
         else:
             return pd.DataFrame(self.scaler.inverse_transform(series.reshape(-1, 1)))
 
     def setup(self, stage: str):
-        split = [round(len(self.targets) * 0.7), round(len(self.targets) * 0.9)]
+        self.split = [round(len(self.df) * 0.7), round(len(self.df) * 0.9)]
 
-        self.f_train, self.t_train = self.windows[:split[0]], self.targets[:split[0]]
-        self.f_valid, self.t_valid = self.windows[split[0]:split[1]], self.targets[split[0]:split[1]]
-        self.f_test, self.t_test = self.windows[split[1]:], self.targets[split[1]:]
+        self.f_train, self.t_train = self.windows[:self.split[0]], self.targets[:self.split[0]]
+        self.f_valid, self.t_valid = self.windows[self.split[0]:self.split[1]], self.targets[self.split[0]:self.split[1]]
+        self.f_test, self.t_test = self.windows[self.split[1]:], self.targets[self.split[1]:]
 
         print(f'Train: {self.f_train.shape}\nValid: {self.f_valid.shape}\nTest: {self.f_test.shape}')
 
@@ -133,7 +135,7 @@ def get_dates(weeks_ = 52):
 
     return formatted_one_year_ago_rounded, formatted_today_rounded_down, today
 
-def train(dm= None, folder='models_2', train_models=True, load_train=False, rfr=True, xgb_=True, knn=True, ridge=True, window_size=24, step=1):
+def train(dm= None, folder='models_2', train_models=True, rfr=True, xgb_=True, knn=True, ridge=True, window_size=24, step=1):
     if dm.column == None:
         uni_multi = 'multi'
     else:
@@ -145,8 +147,8 @@ def train(dm= None, folder='models_2', train_models=True, load_train=False, rfr=
         X_valid = dm.f_valid.reshape(-1, window_size * dm.df.shape[1])
 
         if dm.column == None:
-            y_ = dm.t_train[:,:,2]
-            y_valid = dm.t_valid[:,:,2]
+            y_ = dm.t_train[:,:,target_col]
+            y_valid = dm.t_valid[:,:,target_col]
         else:
             y_ = dm.t_train
             y_valid = dm.t_valid
@@ -157,13 +159,7 @@ def train(dm= None, folder='models_2', train_models=True, load_train=False, rfr=
 
             print('Training Random Forest Regressor...')
 
-            if load_train:
-                print('Loading model...')
-                rf_regressor_1 = RandomForestRegressor(n_estimators=50, random_state=42, warm_start=True)
-                rf_regressor_1 = joblib.load(f'{folder}/random_forest_model_{uni_multi}_ws_{window_size}_s_{step}.pkl') 
-                print('Model loaded...')
-            else:
-                rf_regressor_1 = RandomForestRegressor(n_estimators=50, random_state=42)       
+            rf_regressor_1 = RandomForestRegressor(n_estimators=50, random_state=42)       
         
                 
             rf_regressor_1.fit(X_, y_)
@@ -281,8 +277,8 @@ def plot_results(seed, height, width, interval, X, y, rfr_model, xgb_model, knn_
             average = step_pred_rfr * weights_[0] + step_pred_xgb * weights_[1] + step_pred_knn * weights_[2] + step_pred_ridge * weights_[3]
 
             if dm.column == None:
-                t_test_data = y[seed:seed + step][0][:, 2]
-                current_data = current_data[:, 2]
+                t_test_data = y[seed:seed + step][0][:, target_col]
+                current_data = current_data[:, target_col]
             else:
                 t_test_data = y[seed]
 
@@ -343,3 +339,41 @@ def plot_results(seed, height, width, interval, X, y, rfr_model, xgb_model, knn_
     plt.show()
 
     return [np.mean(value) for value in mse_tracker.values()]
+
+def metrics(column_, X, y, rfr_model, xgb_model, knn_model, ridge_model, window_size, col_):    
+    weights = [0.25, 0.25, 0.25, 0.25]
+
+    if column_ == None:
+        y_true = y[:, :, target_col]
+    else:
+        y_true = y
+
+    X_valid = X.reshape(-1, window_size * col_)
+
+    y_pred_knn = knn_model.predict(X_valid)
+    y_pred_ridge = ridge_model.predict(X_valid)
+    y_pred_rfr = rfr_model.predict(X_valid)
+    y_pred_xgb = xgb_model.predict(X_valid)
+    y_pred_avg = y_pred_rfr * weights[0] + y_pred_xgb * weights[1] + y_pred_knn * weights[2] + y_pred_ridge * weights[3]
+
+
+    mse_avg = mean_squared_error(y_true, y_pred_avg)
+    mse_knn = mean_squared_error(y_true, y_pred_knn)
+    mse_ridge = mean_squared_error(y_true, y_pred_ridge)
+    mse_rfr = mean_squared_error(y_true, y_pred_rfr)
+    mse_xgb = mean_squared_error(y_true, y_pred_xgb)
+
+    # Print MSE for each model
+    print("MSE for Average model:", mse_avg)
+    print("MSE for kNN model:", mse_knn)
+    print("MSE for Ridge model:", mse_ridge)
+    print("MSE for Random Forest model:", mse_rfr)
+    print("MSE for XGBoost model:", mse_xgb)
+
+    plt.figure(figsize=(8, 6))  
+    plt.bar(['Average', 'kNN', 'Ridge', 'Random Forest', 'XGBoost'], [mse_avg, mse_knn, mse_ridge, mse_rfr, mse_xgb])
+    plt.xlabel('Models')
+    plt.ylabel('Normalized Mean Squared Error (MSE)')
+    plt.title('MSE for Different Models')
+    plt.show()
+

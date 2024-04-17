@@ -24,12 +24,20 @@ import xgboost as xgb
 
 import joblib
 
+import tensorflow as tf
+
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense, LSTM, GRU, Conv1D, MaxPooling1D, Flatten, Dropout
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from sklearn.metrics import mean_squared_error
+
+
 target_col = 0
 
 class WeatherDataModule(L.LightningDataModule):
     def __init__(self, data_dir="data\current_weather_data.csv", index_='timestamp', 
                  column=0, batch_size=64, window_size=5, normalize_=False,
-                 date_range = None, step_ = 24):
+                 date_range = None, step_ = 24, return_tensor = True):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -38,6 +46,7 @@ class WeatherDataModule(L.LightningDataModule):
         self.date_range = date_range
         self.window_size = window_size
         self.step_ = step_
+        self.return_tensor = return_tensor
 
         self.normalize_ = normalize_
 
@@ -75,7 +84,11 @@ class WeatherDataModule(L.LightningDataModule):
 
         X_r = torch.tensor(np.array(X))
         y_r = torch.tensor(np.array(y))
-        return X_r.float(), y_r.float()
+
+        if self.return_tensor:
+            return X_r.float(), y_r.float()
+        else:
+            return np.array(X), np.array(y)
     
     def normalize(self, series):
         if self.column == None:
@@ -376,4 +389,56 @@ def metrics(column_, X, y, rfr_model, xgb_model, knn_model, ridge_model, window_
     plt.ylabel('Normalized Mean Squared Error (MSE)')
     plt.title('MSE for Different Models')
     plt.show()
+
+def build_model(hidden_size = [64, 32], out = 1, input_shape_ = 24 * 2, type_ = 'DNN'):
+    if type_ == 'DNN':
+        model = Sequential()
+        model.add(Dense(hidden_size[0], input_shape=(input_shape_,)))
+        model.add(Dense(hidden_size[1], activation='relu'))
+        model.add(Dense(out))
+    
+    elif type_ == 'LSTM':
+        model = Sequential()
+        model.add(LSTM(hidden_size[0], input_shape=(input_shape_, 1)))
+        # model.add(Dense(hidden_size[1], activation='relu'))
+        model.add(Dense(out))
+    
+    elif type_ == 'GRU':
+        model = Sequential()
+        model.add(GRU(hidden_size[0], input_shape=(input_shape_, 1)))
+        # model.add(Dense(hidden_size[1], activation='relu'))
+        model.add(Dense(out))
+
+    elif type_ == 'CNN':
+        '''
+        The CNN is more effective when using less layers and filters
+
+        Hyperparameters will include:
+        - Number of filters or hidden size
+        - Kernel size
+        - Total layers
+        '''
+        model = tf.keras.Sequential([
+            Conv1D(filters=hidden_size[0], kernel_size=3, activation='relu', input_shape=(input_shape_, 1)),
+
+            Conv1D(filters=hidden_size[0], kernel_size=3, activation='relu'),
+
+            MaxPooling1D(pool_size=2),
+
+            Conv1D(filters=hidden_size[1], kernel_size=3, activation='relu'),
+
+            Conv1D(filters=hidden_size[1], kernel_size=3, activation='relu'),
+
+            MaxPooling1D(pool_size=2),
+
+            Flatten(),
+
+            Dense(512, activation='relu'),
+
+            Dropout(0.5),
+
+            Dense(out, activation='sigmoid')
+        ])
+
+    return model
 

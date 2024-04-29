@@ -26,9 +26,11 @@ import joblib
 
 import tensorflow as tf
 
-from tensorflow.keras import Sequential
-from tensorflow.keras.layers import Dense, LSTM, GRU, Conv1D, MaxPooling1D, Flatten, Dropout
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow import keras
+
+from keras import Sequential
+from keras.layers import Dense, LSTM, GRU, Conv1D, MaxPooling1D, Flatten, Dropout
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import mean_squared_error
 
 
@@ -434,6 +436,29 @@ def build_model(hidden_size = [64, 32], out = 1, input_shape_ = 24 * 2, type_ = 
             Flatten(),
 
             Dense(512, activation='relu'),
+
+            Dropout(0.5),
+
+            Dense(out, activation='sigmoid')
+        ])
+
+    elif type_ == 'test':
+        model = tf.keras.Sequential([
+            Conv1D(filters=hidden_size[0], kernel_size=3, activation='relu', input_shape=(input_shape_, 1)),
+
+            Conv1D(filters=hidden_size[0], kernel_size=3, activation='relu'),
+
+            MaxPooling1D(pool_size=2),
+
+            Conv1D(filters=hidden_size[1], kernel_size=3, activation='relu'),
+
+            Conv1D(filters=hidden_size[1], kernel_size=3, activation='relu'),
+
+            MaxPooling1D(pool_size=2),
+
+            LSTM(64, activation='relu'),
+
+            Flatten(),            
 
             Dropout(0.5),
 
